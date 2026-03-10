@@ -87,7 +87,7 @@ class GameFrame:
         # Keyboard fallback: Space and Enter trigger spin in many games.
         for key in ("Space", "Enter"):
             try:
-                self._frame.keyboard.press(key)
+                self._frame.page.keyboard.press(key)
                 logger.debug("Spin via keyboard %s", key)
                 return True
             except Exception:
@@ -120,13 +120,23 @@ class GameFrame:
             if selector == "canvas":
                 # Click bottom-centre of canvas where spin button lives.
                 bbox = locator.bounding_box()
-                if bbox:
-                    x = bbox["x"] + bbox["width"] / 2
-                    y = bbox["y"] + bbox["height"] * 0.85
-                    self._frame.mouse.click(x, y)
-                    logger.debug("Clicked canvas at (%.0f, %.0f)", x, y)
-                    return True
-                return False
+                if not bbox:
+                    return False
+                locator.scroll_into_view_if_needed(timeout=2_000)
+                locator.click(
+                    position={
+                        "x": bbox["width"] / 2,
+                        "y": bbox["height"] * 0.85,
+                    },
+                    timeout=3_000,
+                    force=True,
+                )
+                logger.debug(
+                    "Clicked canvas at relative position (%.0f, %.0f)",
+                    bbox["width"] / 2,
+                    bbox["height"] * 0.85,
+                )
+                return True
             locator.click(timeout=3_000)
             logger.debug("Clicked spin button via selector %r", selector)
             return True
