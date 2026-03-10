@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,31 @@ def open_game_page(
     return page, frame
 
 
+def _frame_looks_like_game_url(frame_url: str) -> bool:
+    """Heuristic for identifying slot game frames by URL."""
+    if not frame_url:
+        return False
+    netloc = urlparse(frame_url).netloc.lower()
+    haystack = frame_url.lower()
+    game_hosts = ("habanero", "gameburger", "slotegrator", "slot", "casino")
+    game_tokens = ("habanero", "launch", "game", "slot", "real", "demo")
+    return any(host in netloc for host in game_hosts) or any(tok in haystack for tok in game_tokens)
+
+
+def _find_game_frame_by_url(page: Any) -> Any | None:
+    """Return the most likely game frame by inspecting all frames."""
+    try:
+        for frame in page.frames:
+            if frame == page.main_frame:
+                continue
+            if _frame_looks_like_game_url(getattr(frame, "url", "")):
+                logger.info("Found game frame via frame URL: %s", frame.url)
+                return frame
+    except Exception as exc:
+        logger.debug("Frame URL scan failed: %s", exc)
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
@@ -142,18 +168,26 @@ def _click_play_button(page: Any) -> None:
 
 def _find_game_frame(page: Any, timeout_ms: int) -> Any:
     """Return the game iframe :class:`Frame`, or the page's main frame."""
-    for selector in _IFRAME_SELECTORS:
-        try:
-            iframe_el = page.locator(selector).first
-            if iframe_el.count() == 0:
-                continue
-            iframe_el.wait_for(state="attached", timeout=timeout_ms)
-            frame = iframe_el.content_frame()
-            if frame:
-                logger.info("Found game frame via selector %r: %s", selector, frame.url)
-                return frame
-        except Exception as exc:
-            logger.debug("Iframe selector %r failed: %s", selector, exc)
+    deadline = time.time() + (timeout_ms / 1000)
+
+    while time.time() < deadline:
+        for selector in _IFRAME_SELECTORS:
+            try:
+                iframe_el = page.locator(selector).first
+                if iframe_el.count() == 0:
+                    continue
+                frame = iframe_el.content_frame()
+                if frame:
+                    logger.info("Found game frame via selector %r: %s", selector, frame.url)
+                    return frame
+            except Exception as exc:
+                logger.debug("Iframe selector %r failed: %s", selector, exc)
+
+        frame = _find_game_frame_by_url(page)
+        if frame:
+            return frame
+
+        time.sleep(0.5)
 
     logger.warning("No game iframe found; using main page frame")
     return page.main_frame
